@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__
+.venv
+_data
+tests
+deploy
+*.age
+*.sqlite3*
+identity.txt
+.env
+values.local.yaml

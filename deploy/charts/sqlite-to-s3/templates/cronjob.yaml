@@ -1,0 +1,54 @@
+{{- $keepLast := required "s3.keepLast is required" .Values.s3.keepLast }}
+{{- if not (regexMatch "^[1-9][0-9]*$" (toString $keepLast)) }}
+{{- fail "s3.keepLast must be a positive integer" }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-sqlite-to-s3" .Release.Name | trunc 52 | trimSuffix "-" }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  timeZone: {{ .Values.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: backup
+              image: {{ required "image is required (build and publish the included Dockerfile)" .Values.image | quote }}
+              env:
+                - name: SQLITE_PATH
+                  value: {{ required "sqlite.path is required" .Values.sqlite.path | quote }}
+                - name: AGE_RECIPIENT
+                  value: {{ required "ageRecipient is required" .Values.ageRecipient | quote }}
+                - name: S3_ENDPOINT
+                  value: {{ required "s3.endpoint is required" .Values.s3.endpoint | quote }}
+                - name: S3_BUCKET
+                  value: {{ required "s3.bucket is required" .Values.s3.bucket | quote }}
+                - name: S3_PREFIX
+                  value: {{ required "s3.prefix is required" .Values.s3.prefix | quote }}
+                - name: S3_KEEP_LAST
+                  value: {{ $keepLast | quote }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ required "s3.region is required" .Values.s3.region | quote }}
+                - name: TMPDIR
+                  value: /backup
+              envFrom:
+                - secretRef:
+                    name: {{ required "s3.existingSecret is required" .Values.s3.existingSecret | quote }}
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ required "sqlite.pvcName is required" .Values.sqlite.pvcName | quote }}
+            - name: backup
+              emptyDir: {}

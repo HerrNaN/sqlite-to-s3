@@ -1,0 +1,26 @@
+schedule: "0 3 * * *"
+timeZone: Etc/UTC
+
+# Full image reference. The publishing workflow packages this pinned to a digest.
+image: ""
+# Public age recipient (age1...). Keep the private identity outside the cluster.
+ageRecipient: ""
+
+# Example PVC and filename; verify before deploying.
+sqlite:
+  pvcName: database-data
+  # Path in the backup container; the PVC root is mounted at /data.
+  path: /data/database.sqlite3
+
+s3:
+  # Required S3-compatible endpoint, including https://.
+  endpoint: https://s3.example.com
+  bucket: backups
+  # Dedicated backup prefix: all objects underneath it count toward retention.
+  prefix: sqlite-backups
+  # Keep this many newest current objects after a successful upload (minimum 1).
+  # This does not purge old versions in a versioned bucket.
+  keepLast: 7
+  region: us-east-1
+  # Credentials need list, upload, and delete permissions for the backup prefix.
+  existingSecret: sqlite-to-s3-credentials

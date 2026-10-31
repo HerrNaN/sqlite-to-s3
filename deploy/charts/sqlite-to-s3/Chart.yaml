@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sqlite-to-s3
+description: Scheduled, consistent SQLite snapshots uploaded to S3-compatible storage
+type: application
+version: 0.1.0

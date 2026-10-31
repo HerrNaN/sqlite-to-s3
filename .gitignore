@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+_data/
+values.local.yaml
+.env
+*.age
+*.sqlite3*
+identity.txt

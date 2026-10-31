@@ -1,0 +1,52 @@
+[tools]
+helm = "4.3.1"
+yq = "4"
+
+[tasks.build-image]
+description = "Build the local backup image (does not publish)"
+run = "podman build -t localhost/sqlite-to-s3:test ."
+
+[tasks.test]
+description = "Run offline tests in the local image"
+run = 'podman run --rm --network=none --entrypoint python -v "$PWD/tests:/tests:ro,Z" localhost/sqlite-to-s3:test -m unittest discover -s /tests -v'
+
+[tasks.check-chart]
+description = "Lint and render the chart without accessing a cluster"
+run = [
+  "helm lint --strict deploy/charts/sqlite-to-s3 --set-string image=sqlite-to-s3:test --set-string ageRecipient=render-test-only",
+  "helm template sqlite-backup deploy/charts/sqlite-to-s3 --set-string image=sqlite-to-s3:test --set-string ageRecipient=render-test-only > /dev/null",
+]
+
+[tasks.package-chart]
+description = "Package a Helm chart pinned to an image digest"
+usage = '''
+flag "--version <version>" required=#true
+flag "--app-version <app_version>" required=#true
+flag "--image-repository <image_repository>" required=#true
+flag "--image-digest <image_digest>" required=#true
+flag "--output-dir <output_dir>" default="_data/charts"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ! "$usage_image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "--image-digest must be a sha256 digest" >&2
+  exit 1
+fi
+mkdir -p "$usage_output_dir"
+source_dir=$(mktemp -d "$usage_output_dir/.source.XXXXXX")
+trap 'rm -rf "$source_dir"' EXIT
+cp -R deploy/charts/sqlite-to-s3/. "$source_dir/"
+yq -i '.image = strenv(usage_image_repository) + "@" + strenv(usage_image_digest)' "$source_dir/values.yaml"
+helm lint --strict "$source_dir" --set-string ageRecipient=render-test-only
+helm template sqlite-backup "$source_dir" --set-string ageRecipient=render-test-only > /dev/null
+helm package "$source_dir" --destination "$usage_output_dir" --version "$usage_version" --app-version "$usage_app_version"
+'''
+
+[tasks.publish-chart]
+description = "Publish a packaged Helm chart to an OCI registry"
+usage = '''
+arg "<archive>"
+arg "<registry>"
+'''
+run = 'helm push "$usage_archive" "$usage_registry"'

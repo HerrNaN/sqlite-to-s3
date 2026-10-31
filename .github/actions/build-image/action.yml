@@ -1,0 +1,53 @@
+name: Build Image
+description: Build, test offline, and publish the backup image
+inputs:
+  github-token:
+    required: true
+    description: GitHub token for GHCR
+outputs:
+  digest:
+    description: Digest of the published image
+    value: ${{ steps.push.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - name: Image metadata
+      id: metadata
+      shell: bash
+      run: |
+        echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        echo "tags=devel $GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Build Image
+      id: build
+      uses: redhat-actions/buildah-build@v2
+      with:
+        image: ${{ steps.metadata.outputs.image }}
+        containerfiles: Dockerfile
+        tags: ${{ steps.metadata.outputs.tags }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+
+    - name: Test offline
+      shell: bash
+      env:
+        TEST_IMAGE: ${{ steps.build.outputs.image }}:${{ github.sha }}
+      run: |
+        podman run --rm --network=none --entrypoint python \
+          -v "$GITHUB_WORKSPACE/tests:/tests:ro" "$TEST_IMAGE" \
+          -m unittest discover -s /tests -v
+
+    - uses: redhat-actions/podman-login@v1
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
+
+    - name: Push Images
+      id: push
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        registry: ${{ env.REGISTRY }}
+        image: ${{ steps.build.outputs.image }}
+        tags: ${{ steps.metadata.outputs.tags }}

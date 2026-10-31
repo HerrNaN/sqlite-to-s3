@@ -1,0 +1,71 @@
+name: Trunk
+on:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: devel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish image and devel chart
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+
+      - name: Check chart
+        run: mise check-chart
+
+      - name: Build and publish image
+        id: image
+        uses: ./.github/actions/build-image
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package devel chart
+        id: chart
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          base_version=$(yq -r '.version' deploy/charts/sqlite-to-s3/Chart.yaml)
+          version="${base_version}-$(date -u +%Y%m%d%H%M%S)"
+          package_dir="$RUNNER_TEMP/charts"
+
+          mise package-chart \
+            --version "$version" --app-version "$GITHUB_SHA" \
+            --image-repository "${REGISTRY}/${GITHUB_REPOSITORY,,}" \
+            --image-digest "$IMAGE_DIGEST" --output-dir "$package_dir"
+
+          echo "archive=$package_dir/sqlite-to-s3-$version.tgz" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "registry=oci://${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/charts/devel" >> "$GITHUB_OUTPUT"
+
+      - name: Publish devel chart
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHART_ARCHIVE: ${{ steps.chart.outputs.archive }}
+          CHART_VERSION: ${{ steps.chart.outputs.version }}
+          CHART_REGISTRY: ${{ steps.chart.outputs.registry }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          printf '%s' "$GH_TOKEN" | helm registry login "$REGISTRY" \
+            --username "$GITHUB_ACTOR" --password-stdin
+          mise publish-chart "$CHART_ARCHIVE" "$CHART_REGISTRY"
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Devel published
+          - Chart: \`$CHART_REGISTRY/sqlite-to-s3\`
+          - Version: \`$CHART_VERSION\`
+          - Image: \`${REGISTRY}/${GITHUB_REPOSITORY,,}@$IMAGE_DIGEST\`
+          EOF
